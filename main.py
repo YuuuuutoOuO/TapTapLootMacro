@@ -10,7 +10,7 @@ import pydirectinput
 import random
 import ctypes
 
-# === 環境路徑處理 (解決 EXE 路徑消失問題) ===
+# === 環境路徑處理 ===
 def get_base_path():
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
@@ -20,13 +20,12 @@ SCRIPT_DIR = get_base_path()
 INPUT_FILE = os.path.join(SCRIPT_DIR, "record.json") 
 SETTING_FILE = os.path.join(SCRIPT_DIR, "setting.json") 
 
-# 核心優化：關閉 pydirectinput 預設延遲
 pydirectinput.PAUSE = 0
 
 class MacroApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("TapTapLoot點擊腳本")
+        self.root.title("TapTapLootMacro")
         self.root.geometry("440x580")
         self.root.resizable(False, False)
         
@@ -37,7 +36,6 @@ class MacroApp:
         self.settings = self.init_settings()
         self.setup_ui()
         
-        # 註冊 F9 緊急中斷全域熱鍵
         keyboard.add_hotkey('f9', lambda: self.trigger_stop())
         
     def init_settings(self):
@@ -62,22 +60,27 @@ class MacroApp:
         except:
             return default
 
-    def save_current_settings(self):
+    def save_current_settings(self, *args):
+        """【核心修復】現在由 trace_add 觸發，輸入的瞬間即時寫入 JSON"""
         try:
+            # 使用 or "0" 是為了防止使用者把輸入框清空時產生 ValueError 崩潰
             self.settings.update({
-                "REPLAY_TIMES": int(self.replay_times_var.get()),
-                "DELAY_BEFORE_START": int(self.delay_var.get()),
-                "RECORD_SECONDS": int(self.record_sec_var.get()),
+                "REPLAY_TIMES": int(self.replay_times_var.get() or 0),
+                "DELAY_BEFORE_START": int(self.delay_var.get() or 0),
+                "RECORD_SECONDS": int(self.record_sec_var.get() or 0),
                 "LIMIT_CPS_ENABLED": self.cps_enable_var.get(),
-                "MAX_CPS": int(self.max_cps_var.get()),
+                "MAX_CPS": int(self.max_cps_var.get() or 0),
                 "STOP_ON_FOCUS_LOST": self.focus_stop_var.get()
             })
             with open(SETTING_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, indent=4, ensure_ascii=False)
-        except: pass
+        except ValueError:
+            # 忽略使用者打字打一半（例如暫時清空欄位）時的整數轉換錯誤
+            pass
+        except Exception:
+            pass
 
     def trigger_stop(self, reason="🚨 已手動強制中斷！"):
-        """觸發中斷，支援自訂中斷原因"""
         if self.is_running:
             self.stop_event.set()
             self.root.after(0, lambda: self.update_status(reason, "red"))
@@ -94,24 +97,33 @@ class MacroApp:
         ttk.Radiobutton(mode_frame, text="錄製 (Record)", variable=self.mode_var, value="record").grid(row=0, column=1, padx=5, pady=2, sticky="w")
         ttk.Radiobutton(mode_frame, text="自動生成腳本", variable=self.mode_var, value="generate").grid(row=0, column=2, padx=5, pady=2, sticky="w")
 
-        param_frame = ttk.LabelFrame(container, text="參數設定 (將自動儲存)", padding=10)
+        param_frame = ttk.LabelFrame(container, text="參數設定 (即時自動儲存)", padding=10)
         param_frame.pack(fill="x", pady=5)
 
+        # 建立變數
         self.record_sec_var = tk.StringVar(value=str(self.settings["RECORD_SECONDS"]))
-        self.create_field(param_frame, "錄製總秒數:", self.record_sec_var, 0)
-
         self.replay_times_var = tk.StringVar(value=str(self.settings["REPLAY_TIMES"]))
-        self.create_field(param_frame, "回放次數:", self.replay_times_var, 1)
-
         self.delay_var = tk.StringVar(value=str(self.settings["DELAY_BEFORE_START"]))
+        self.cps_enable_var = tk.BooleanVar(value=self.settings["LIMIT_CPS_ENABLED"])
+        self.max_cps_var = tk.StringVar(value=str(self.settings["MAX_CPS"]))
+        self.focus_stop_var = tk.BooleanVar(value=self.settings["STOP_ON_FOCUS_LOST"])
+
+        # 綁定即時監聽器 (Trace)：只要變數一被修改，立刻執行 save_current_settings
+        self.record_sec_var.trace_add("write", self.save_current_settings)
+        self.replay_times_var.trace_add("write", self.save_current_settings)
+        self.delay_var.trace_add("write", self.save_current_settings)
+        self.cps_enable_var.trace_add("write", self.save_current_settings)
+        self.max_cps_var.trace_add("write", self.save_current_settings)
+        self.focus_stop_var.trace_add("write", self.save_current_settings)
+
+        # 繪製 UI
+        self.create_field(param_frame, "錄製總秒數:", self.record_sec_var, 0)
+        self.create_field(param_frame, "回放次數:", self.replay_times_var, 1)
         self.create_field(param_frame, "啟動延遲 (秒):", self.delay_var, 2)
 
-        self.cps_enable_var = tk.BooleanVar(value=self.settings["LIMIT_CPS_ENABLED"])
         ttk.Checkbutton(param_frame, text="啟用每秒點擊上限", variable=self.cps_enable_var).grid(row=3, column=0, pady=5, sticky="w")
-        self.max_cps_var = tk.StringVar(value=str(self.settings["MAX_CPS"]))
         ttk.Entry(param_frame, textvariable=self.max_cps_var, width=8).grid(row=3, column=1, sticky="w", padx=5)
 
-        self.focus_stop_var = tk.BooleanVar(value=self.settings["STOP_ON_FOCUS_LOST"])
         ttk.Checkbutton(param_frame, text="失去視窗焦點時自動暫停 (防誤觸)", variable=self.focus_stop_var).grid(row=4, column=0, columnspan=2, pady=5, sticky="w")
 
         self.status_label = ttk.Label(container, text="狀態: 準備就緒", font=("", 10, "bold"), foreground="blue")
@@ -158,7 +170,6 @@ class MacroApp:
         threading.Thread(target=target, daemon=True).start()
 
     def wait_and_lock_target(self, delay_seconds):
-        """核心修復：倒數期間智慧監控視窗焦點"""
         ui_hwnd = ctypes.windll.user32.GetForegroundWindow()
         target_hwnd = None
 
@@ -171,7 +182,6 @@ class MacroApp:
                 self.root.after(0, lambda val=d: self.update_status(f"⏳ 請切換至目標視窗... 倒數 {val} 秒", "orange"))
 
             end_t = time.perf_counter() + 1.0
-            # 將 1 秒的等待切分為每 10ms 檢查一次
             while time.perf_counter() < end_t:
                 if self.stop_event.is_set(): return None
 
@@ -179,26 +189,22 @@ class MacroApp:
                     curr_hwnd = ctypes.windll.user32.GetForegroundWindow()
                     
                     if target_hwnd is None:
-                        # 只要使用者離開了 UI 介面，就立刻將新視窗登記為目標！
                         if curr_hwnd != ui_hwnd and curr_hwnd != 0:
                             target_hwnd = curr_hwnd
                             self.root.after(0, lambda val=d: self.update_status(f"🎯 提早鎖定視窗！倒數 {val} 秒...", "orange"))
                     else:
-                        # 如果已經鎖定目標，但使用者又切走了，立刻引爆安全機制
                         if curr_hwnd != target_hwnd:
                             self.trigger_stop("⚠️ 倒數期間切換視窗，已安全取消！")
                             return None
                             
                 time.sleep(0.01)
 
-        # 若倒數結束使用者都沒切換，就以當下視窗為主
         if target_hwnd is None:
             target_hwnd = ctypes.windll.user32.GetForegroundWindow()
 
         return target_hwnd
 
     def precise_sleep(self, duration, target_hwnd=None):
-        """高精度延遲，期間不間斷偵測失焦"""
         if duration <= 0: return
         end_time = time.perf_counter() + duration
         
@@ -251,7 +257,6 @@ class MacroApp:
             delay = int(self.delay_var.get())
             sec = int(self.record_sec_var.get())
             
-            # 使用全新的智慧鎖定倒數機制
             target_hwnd = self.wait_and_lock_target(delay)
             if self.stop_event.is_set() or target_hwnd is None:
                 return
@@ -312,7 +317,6 @@ class MacroApp:
 
             delay = int(self.delay_var.get())
             
-            # 使用全新的智慧鎖定倒數機制
             target_hwnd = self.wait_and_lock_target(delay)
             if self.stop_event.is_set() or target_hwnd is None:
                 return
