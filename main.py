@@ -152,7 +152,7 @@ class MacroApp:
         
         mode = self.mode_var.get()
         if mode == "generate":
-            cps = simpledialog.askinteger("自動生成腳本", "請輸入每秒點擊次數 (例如 20):", parent=self.root, minvalue=1, maxvalue=500)
+            cps = simpledialog.askinteger("自動生成腳本", "請輸入每秒點擊次數 \n(例如 20、請注意點即次數過高可能會導致系統異常):", parent=self.root, minvalue=1, maxvalue=2147483647)
             if not cps: return
             self.cps_to_generate = cps
 
