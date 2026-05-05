@@ -1,0 +1,4 @@
+keyboard>=0.13.5
+pydirectinput>=1.0.4
+pillow>=9.0.0
+numpy>=1.23
