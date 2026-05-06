@@ -13,7 +13,6 @@ main.py — 程式進入點
 import os
 import sys
 import tkinter as tk
-
 from ui.main_window import MacroApp
 
 
